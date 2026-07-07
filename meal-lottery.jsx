@@ -438,6 +438,47 @@ export default function MealLottery() {
   };
   const clearStores = () => { setPickedStores([]); setResults(null); setSetLabel(null); };
 
+  /* 關鍵字搜尋（表格模式）：跨三個熱量搜尋店家與品項 */
+  const [query, setQuery] = useState("");
+  const q = query.trim();
+  const searchHits = useMemo(() => {
+    if (!q) return [];
+    const ql = q.toLowerCase();
+    const hits = [];
+    [1600, 1800, 2000].forEach((cv) => {
+      RAW[cv].forEach((block, bi) => {
+        MEAL_ORDER[cv].forEach((m) => {
+          (block[m] || []).forEach((cb, ci) => {
+            const hay = ((cb.store || "") + " " + cb.items.join(" ")).toLowerCase();
+            if (hay.includes(ql)) hits.push({ cal: cv, bi, ci, meal: m, combo: cb });
+          });
+        });
+      });
+    });
+    return hits;
+  }, [q]);
+
+  const cellMatches = (cb) => {
+    if (!q) return false;
+    return ((cb.store || "") + " " + cb.items.join(" ")).toLowerCase().includes(q.toLowerCase());
+  };
+
+  const hl = (text) => {
+    if (!q) return text;
+    const t = String(text);
+    const ql = q.toLowerCase();
+    const tl = t.toLowerCase();
+    const parts = [];
+    let i = 0, idx, k = 0;
+    while ((idx = tl.indexOf(ql, i)) !== -1) {
+      if (idx > i) parts.push(t.slice(i, idx));
+      parts.push(<mark key={k++} style={S.mark}>{t.slice(idx, idx + q.length)}</mark>);
+      i = idx + q.length;
+    }
+    parts.push(t.slice(i));
+    return parts;
+  };
+
   const activeMode = mode === "day" || meals.includes(mode) ? mode : "day";
   const isSetDraw = activeMode === "day" && dayStyle === "set" && !filterActive;
 
@@ -862,6 +903,45 @@ export default function MealLottery() {
       ) : (
         /* ---------- 表格模式：照原始海報排版 ---------- */
         <section style={S.tableWrap}>
+          {/* 關鍵字搜尋 */}
+          <div style={S.searchWrap}>
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="搜尋店家或品項，例如：牛肉麵、7-11、茶碗蒸"
+              style={S.searchInput}
+              aria-label="搜尋菜單"
+            />
+            {q && (
+              <div style={S.searchResult}>
+                {searchHits.length === 0 ? (
+                  <div style={S.searchEmpty}>三份菜單裡都沒有「{q}」，換個關鍵字試試</div>
+                ) : (
+                  <>
+                    <div style={S.searchCount}>找到 {searchHits.length} 筆（點擊可跳到該熱量）</div>
+                    <div style={S.hitList}>
+                      {searchHits.map((h, i) => (
+                        <button
+                          key={i}
+                          className="hit-row"
+                          style={{ ...S.hitRow, ...(h.cal === cal ? S.hitRowCurrent : {}) }}
+                          onClick={() => { if (h.cal !== cal) changeCal(h.cal); }}
+                        >
+                          <span style={S.hitLoc}>{h.cal}卡・第{h.bi + 1}組・組合{NUM_CN[h.ci]}・{h.meal}</span>
+                          <span style={S.hitBody}>
+                            {h.combo.store && <b style={{ color: VERMILION }}>{hl(h.combo.store)}</b>}
+                            {h.combo.store ? "：" : ""}{hl(h.combo.items.join("、"))}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
           <p style={S.tableHint}>
             依原始海報排列：{cal} 大卡共 3 組菜單表，每組有組合一～五。抽籤池即由下列所有格子組成。
           </p>
@@ -885,10 +965,10 @@ export default function MealLottery() {
                           <span style={{ marginRight: 4 }}>{MEAL_ICON[m]}</span>{m}
                         </td>
                         {(block[m] || []).map((combo, ci) => (
-                          <td key={ci} style={S.td}>
-                            {combo.store && <div style={S.cellStore}>{combo.store}</div>}
+                          <td key={ci} style={{ ...S.td, ...(cellMatches(combo) ? S.tdHit : {}) }}>
+                            {combo.store && <div style={S.cellStore}>{hl(combo.store)}</div>}
                             {combo.items.map((it, ii) => (
-                              <div key={ii} style={S.cellItem}>{it}</div>
+                              <div key={ii} style={S.cellItem}>{hl(it)}</div>
                             ))}
                           </td>
                         ))}
@@ -1163,6 +1243,35 @@ const S = {
 
   /* 表格模式 */
   tableWrap: { width: "100%", maxWidth: 1080 },
+  searchWrap: { marginBottom: 18 },
+  searchInput: {
+    width: "100%", boxSizing: "border-box",
+    padding: "13px 18px", borderRadius: 999,
+    border: `2px solid ${INK}`, background: "#FFFDF6",
+    fontSize: 15, color: INK, outline: "none",
+    fontFamily: `'Noto Sans TC', 'PingFang TC', sans-serif`,
+    boxShadow: "3px 4px 0 rgba(43,35,32,.12)",
+  },
+  searchResult: { marginTop: 10 },
+  searchCount: { fontSize: 12, color: "#9A8468", letterSpacing: "0.1em", marginBottom: 8 },
+  searchEmpty: {
+    fontSize: 13, color: "#8A7860", background: "#F3E5C8",
+    borderRadius: 10, padding: "10px 14px",
+  },
+  hitList: { display: "flex", flexDirection: "column", gap: 6, maxHeight: 320, overflowY: "auto" },
+  hitRow: {
+    textAlign: "left", cursor: "pointer",
+    background: "#FFFBF0", border: "1.5px solid #E4D3B4", borderRadius: 10,
+    padding: "8px 12px", fontSize: 13, lineHeight: 1.6, color: "#4C4238",
+    display: "flex", flexDirection: "column", gap: 2,
+    transition: "all .15s ease",
+    fontFamily: `'Noto Sans TC', 'PingFang TC', sans-serif`,
+  },
+  hitRowCurrent: { border: `1.5px solid ${VERMILION}` },
+  hitLoc: { fontSize: 11.5, color: "#9A8468", letterSpacing: "0.08em", fontWeight: 700 },
+  hitBody: {},
+  mark: { background: "#FFD98A", color: "#5A3E12", borderRadius: 3, padding: "0 1px" },
+  tdHit: { background: "#FFF0D2", boxShadow: `inset 0 0 0 2px ${AMBER}` },
   tableHint: { fontSize: 13, color: "#8A7860", margin: "0 0 16px", lineHeight: 1.7 },
   blockCard: {
     background: "#FFFBF0",
@@ -1220,6 +1329,7 @@ const CSS = `
 .export-btn:active { transform: translateY(1px); }
 .modal-btn:hover { background: ${INK}; color: ${PAPER}; }
 .modal-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(169,51,32,.4); }
+.hit-row:hover { border-color: ${INK}; transform: translateX(2px); }
 button:focus-visible { outline: 3px solid ${AMBER}; outline-offset: 2px; }
 
 @keyframes shake {
