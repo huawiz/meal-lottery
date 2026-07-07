@@ -391,6 +391,7 @@ export default function MealLottery() {
   const [setLabel, setSetLabel] = useState(null);
   const [results, setResults] = useState(null);
   const [shaking, setShaking] = useState(false);
+  const [exportData, setExportData] = useState(null); // { url, blob, name }
   const [drawCount, setDrawCount] = useState(0);
   const [reduceMotion, setReduceMotion] = useState(false);
 
@@ -582,9 +583,33 @@ export default function MealLottery() {
     rrect(24, 24, W - 48, H - 48, 28); ctx.stroke();
     paint(true);
 
+    const name = `今日食籤_${ymd}.png`;
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      setExportData({ url: URL.createObjectURL(blob), blob, name });
+    }, "image/png");
+  };
+
+  const closeExport = () => {
+    if (exportData) URL.revokeObjectURL(exportData.url);
+    setExportData(null);
+  };
+
+  const shareExport = async () => {
+    if (!exportData) return;
+    const file = new File([exportData.blob], exportData.name, { type: "image/png" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file] }); } catch (e) { /* 使用者取消分享 */ }
+    } else {
+      downloadExport();
+    }
+  };
+
+  const downloadExport = () => {
+    if (!exportData) return;
     const a = document.createElement("a");
-    a.href = canvas.toDataURL("image/png");
-    a.download = `今日食籤_${ymd}.png`;
+    a.href = exportData.url;
+    a.download = exportData.name;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -793,6 +818,29 @@ export default function MealLottery() {
         </section>
       )}
 
+      {exportData && (
+        <div style={S.modalOverlay} onClick={closeExport}>
+          <div style={S.modalCard} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalTitle}>今日籤已產生 🎋</div>
+            <div style={S.modalHintTop}>手機可直接長按圖片儲存到相簿</div>
+            <div style={S.modalImgWrap}>
+              <img src={exportData.url} alt="今日食籤" style={S.modalImg} />
+            </div>
+            <div style={S.modalBtnRow}>
+              <button onClick={shareExport} className="modal-btn-primary" style={S.modalBtnPrimary}>
+                分享／存到相簿
+              </button>
+              <button onClick={downloadExport} className="modal-btn" style={S.modalBtn}>
+                下載檔案
+              </button>
+              <button onClick={closeExport} className="modal-btn" style={S.modalBtn}>
+                關閉
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <footer style={S.footer}>
         菜單來源：Nuture Fit 營養專家 減脂減醣菜單（1600／1800／2000 大卡）
       </footer>
@@ -955,6 +1003,50 @@ const S = {
   empty: { marginTop: 8, textAlign: "center", color: "#9A8468", fontSize: 15, lineHeight: 1.9, letterSpacing: "0.08em" },
 
   exportWrap: { marginTop: 26, textAlign: "center" },
+  modalOverlay: {
+    position: "fixed", inset: 0, zIndex: 100,
+    background: "rgba(43,35,32,.55)",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    padding: 16,
+  },
+  modalCard: {
+    background: "#FFFBF0",
+    border: "2px solid #2B2320",
+    borderRadius: 18,
+    boxShadow: "6px 8px 0 rgba(43,35,32,.25)",
+    padding: "18px 18px 16px",
+    width: "100%", maxWidth: 420,
+    maxHeight: "90vh",
+    display: "flex", flexDirection: "column",
+  },
+  modalTitle: {
+    fontFamily: `'Noto Serif TC', serif`,
+    fontSize: 20, fontWeight: 900, color: "#2B2320",
+    textAlign: "center", letterSpacing: "0.1em",
+  },
+  modalHintTop: { fontSize: 12, color: "#9A8468", textAlign: "center", margin: "6px 0 12px" },
+  modalImgWrap: {
+    overflowY: "auto", WebkitOverflowScrolling: "touch",
+    border: "1px solid #E4D3B4", borderRadius: 10,
+    background: "#F6E7C9", flex: 1, minHeight: 0,
+  },
+  modalImg: { display: "block", width: "100%", height: "auto" },
+  modalBtnRow: { display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" },
+  modalBtnPrimary: {
+    flex: "1 1 100%",
+    padding: "12px 16px", borderRadius: 999, border: "none",
+    background: "linear-gradient(135deg, #C8402A, #A93320)",
+    color: "#FFF6E9", fontSize: 15, fontWeight: 800, letterSpacing: "0.12em",
+    cursor: "pointer",
+    boxShadow: "0 6px 16px rgba(169,51,32,.3)",
+  },
+  modalBtn: {
+    flex: 1,
+    padding: "10px 12px", borderRadius: 999,
+    border: "1.5px solid #2B2320", background: "transparent",
+    color: "#2B2320", fontSize: 13, fontWeight: 700, letterSpacing: "0.08em",
+    cursor: "pointer", transition: "all .18s ease",
+  },
   exportBtn: {
     padding: "12px 30px", borderRadius: 999,
     border: `2px solid ${INK}`, background: "#FFFDF6", color: INK,
@@ -1020,6 +1112,8 @@ const CSS = `
 .redraw-btn:hover { background: ${JADE}; color: #FFFBF0; }
 .export-btn:hover { background: ${INK}; color: ${PAPER}; transform: translateY(-2px); }
 .export-btn:active { transform: translateY(1px); }
+.modal-btn:hover { background: ${INK}; color: ${PAPER}; }
+.modal-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(169,51,32,.4); }
 button:focus-visible { outline: 3px solid ${AMBER}; outline-offset: 2px; }
 
 @keyframes shake {
