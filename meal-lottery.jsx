@@ -440,6 +440,12 @@ export default function MealLottery() {
 
   /* 關鍵字搜尋（表格模式）：跨三個熱量搜尋店家與品項 */
   const [query, setQuery] = useState("");
+  /* 表格模式的餐別篩選：空陣列 = 全部 */
+  const [tableMeals, setTableMeals] = useState([]);
+  const toggleTableMeal = (m) => {
+    setTableMeals((prev) => prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]);
+  };
+  const visibleTableMeals = tableMeals.length ? meals.filter((m) => tableMeals.includes(m)) : meals;
   const q = query.trim();
   const searchHits = useMemo(() => {
     if (!q) return [];
@@ -692,6 +698,7 @@ export default function MealLottery() {
     setResults(null);
     setSetLabel(null);
     setPickedStores([]); // 各熱量的商家清單不同，切換時重置
+    setTableMeals([]); // 各熱量的餐別名稱不同（2000 卡有兩次點心），切換時重置
     if (mode !== "day" && !MEAL_ORDER[cNew].includes(mode)) setMode("day");
   };
   const changeMode = (m) => { setMode(m); setResults(null); setSetLabel(null); };
@@ -942,6 +949,23 @@ export default function MealLottery() {
             )}
           </div>
 
+          {/* 餐別篩選 */}
+          <div style={S.tableMealRow}>
+            <button
+              onClick={() => setTableMeals([])}
+              className="meal-btn"
+              style={{ ...S.mealBtn, ...(tableMeals.length === 0 ? S.mealBtnActive : {}) }}
+            >全部</button>
+            {meals.map((m) => (
+              <button
+                key={m}
+                onClick={() => toggleTableMeal(m)}
+                className="meal-btn"
+                style={{ ...S.mealBtn, ...(tableMeals.includes(m) ? S.mealBtnActive : {}) }}
+              >{MEAL_ICON[m]} {m}</button>
+            ))}
+          </div>
+
           <p style={S.tableHint}>
             依原始海報排列：{cal} 大卡共 3 組菜單表，每組有組合一～五。抽籤池即由下列所有格子組成。
           </p>
@@ -959,7 +983,7 @@ export default function MealLottery() {
                     </tr>
                   </thead>
                   <tbody>
-                    {meals.map((m) => (
+                    {visibleTableMeals.map((m) => (
                       <tr key={m}>
                         <td style={S.tdMeal}>
                           <span style={{ marginRight: 4 }}>{MEAL_ICON[m]}</span>{m}
@@ -1243,7 +1267,8 @@ const S = {
 
   /* 表格模式 */
   tableWrap: { width: "100%", maxWidth: 1080 },
-  searchWrap: { marginBottom: 18 },
+  searchWrap: { marginBottom: 14 },
+  tableMealRow: { display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 },
   searchInput: {
     width: "100%", boxSizing: "border-box",
     padding: "13px 18px", borderRadius: 999,

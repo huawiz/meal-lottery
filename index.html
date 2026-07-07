@@ -550,6 +550,12 @@ function MealLottery() {
 
   /* 關鍵字搜尋（表格模式）：跨三個熱量搜尋店家與品項 */
   const [query, setQuery] = useState("");
+  /* 表格模式的餐別篩選：空陣列 = 全部 */
+  const [tableMeals, setTableMeals] = useState([]);
+  const toggleTableMeal = m => {
+    setTableMeals(prev => prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m]);
+  };
+  const visibleTableMeals = tableMeals.length ? meals.filter(m => tableMeals.includes(m)) : meals;
   const q = query.trim();
   const searchHits = useMemo(() => {
     if (!q) return [];
@@ -860,6 +866,7 @@ function MealLottery() {
     setResults(null);
     setSetLabel(null);
     setPickedStores([]); // 各熱量的商家清單不同，切換時重置
+    setTableMeals([]); // 各熱量的餐別名稱不同（2000 卡有兩次點心），切換時重置
     if (mode !== "day" && !MEAL_ORDER[cNew].includes(mode)) setMode("day");
   };
   const changeMode = m => {
@@ -1136,7 +1143,24 @@ function MealLottery() {
     style: {
       color: VERMILION
     }
-  }, hl(h.combo.store)), h.combo.store ? "：" : "", hl(h.combo.items.join("、"))))))))), /*#__PURE__*/React.createElement("p", {
+  }, hl(h.combo.store)), h.combo.store ? "：" : "", hl(h.combo.items.join("、"))))))))), /*#__PURE__*/React.createElement("div", {
+    style: S.tableMealRow
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setTableMeals([]),
+    className: "meal-btn",
+    style: {
+      ...S.mealBtn,
+      ...(tableMeals.length === 0 ? S.mealBtnActive : {})
+    }
+  }, "全部"), meals.map(m => /*#__PURE__*/React.createElement("button", {
+    key: m,
+    onClick: () => toggleTableMeal(m),
+    className: "meal-btn",
+    style: {
+      ...S.mealBtn,
+      ...(tableMeals.includes(m) ? S.mealBtnActive : {})
+    }
+  }, MEAL_ICON[m], " ", m))), /*#__PURE__*/React.createElement("p", {
     style: S.tableHint
   }, "依原始海報排列：", cal, " 大卡共 3 組菜單表，每組有組合一～五。抽籤池即由下列所有格子組成。"), RAW[cal].map((block, bi) => /*#__PURE__*/React.createElement("div", {
     key: bi,
@@ -1155,7 +1179,7 @@ function MealLottery() {
   }, "餐別"), ["組合一", "組合二", "組合三", "組合四", "組合五"].map(h => /*#__PURE__*/React.createElement("th", {
     key: h,
     style: S.th
-  }, h)))), /*#__PURE__*/React.createElement("tbody", null, meals.map(m => /*#__PURE__*/React.createElement("tr", {
+  }, h)))), /*#__PURE__*/React.createElement("tbody", null, visibleTableMeals.map(m => /*#__PURE__*/React.createElement("tr", {
     key: m
   }, /*#__PURE__*/React.createElement("td", {
     style: S.tdMeal
@@ -1666,7 +1690,13 @@ const S = {
     maxWidth: 1080
   },
   searchWrap: {
-    marginBottom: 18
+    marginBottom: 14
+  },
+  tableMealRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 14
   },
   searchInput: {
     width: "100%",
