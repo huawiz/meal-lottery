@@ -462,6 +462,23 @@ function buildPools(cal) {
   });
   return pools;
 }
+const NUM_CN = ["一", "二", "三", "四", "五"];
+function buildDayCombos(cal) {
+  const list = [];
+  RAW[cal].forEach((block, bi) => {
+    for (let ci = 0; ci < 5; ci++) {
+      const meals = {};
+      MEAL_ORDER[cal].forEach(m => {
+        meals[m] = block[m][ci];
+      });
+      list.push({
+        label: `第${bi + 1}組・組合${NUM_CN[ci]}`,
+        meals
+      });
+    }
+  });
+  return list;
+}
 function drawOne(pool, avoidStamp) {
   if (!pool || pool.length === 0) return null;
   let pick = pool[Math.floor(Math.random() * pool.length)];
@@ -481,11 +498,14 @@ function MealLottery() {
   const [view, setView] = useState("draw"); // 'draw' | 'table'
   const [cal, setCal] = useState(1600);
   const [mode, setMode] = useState("day");
+  const [dayStyle, setDayStyle] = useState("set"); // 'set' 照組合抽 | 'mix' 自由混搭
+  const [setLabel, setSetLabel] = useState(null);
   const [results, setResults] = useState(null);
   const [shaking, setShaking] = useState(false);
   const [drawCount, setDrawCount] = useState(0);
   const [reduceMotion, setReduceMotion] = useState(false);
   useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
     setReduceMotion(mq.matches);
     const fn = e => setReduceMotion(e.matches);
@@ -493,20 +513,36 @@ function MealLottery() {
     return () => mq.removeEventListener?.("change", fn);
   }, []);
   const pools = useMemo(() => buildPools(cal), [cal]);
+  const dayCombos = useMemo(() => buildDayCombos(cal), [cal]);
   const meals = MEAL_ORDER[cal];
   const activeMode = mode === "day" || meals.includes(mode) ? mode : "day";
+  const isSetDraw = activeMode === "day" && dayStyle === "set";
   const doDraw = () => {
     const run = () => {
-      const next = {};
-      const targets = activeMode === "day" ? meals : [activeMode];
-      targets.forEach(m => {
-        const prev = results && results[m] ? stamp(results[m]) : null;
-        next[m] = drawOne(pools[m], prev);
-      });
-      setResults(activeMode === "day" ? next : {
-        ...(results || {}),
-        ...next
-      });
+      if (isSetDraw) {
+        let pick = dayCombos[Math.floor(Math.random() * dayCombos.length)];
+        let guard = 0;
+        while (setLabel && pick.label === setLabel && dayCombos.length > 1 && guard < 12) {
+          pick = dayCombos[Math.floor(Math.random() * dayCombos.length)];
+          guard++;
+        }
+        setResults({
+          ...pick.meals
+        });
+        setSetLabel(pick.label);
+      } else {
+        const next = {};
+        const targets = activeMode === "day" ? meals : [activeMode];
+        targets.forEach(m => {
+          const prev = results && results[m] ? stamp(results[m]) : null;
+          next[m] = drawOne(pools[m], prev);
+        });
+        setResults(activeMode === "day" ? next : {
+          ...(results || {}),
+          ...next
+        });
+        setSetLabel(null);
+      }
       setDrawCount(n => n + 1);
     };
     if (reduceMotion) {
@@ -525,16 +561,200 @@ function MealLottery() {
       ...(results || {}),
       [m]: drawOne(pools[m], prev)
     });
+    setSetLabel(null); // 換掉單一餐後就不再是原本的整組
     setDrawCount(n => n + 1);
+  };
+
+  /* 輸出今日籤圖片：純 Canvas，不需外部函式庫 */
+  const exportImage = async () => {
+    const targets = (activeMode === "day" ? meals : [activeMode]).filter(m => results && results[m]);
+    if (!targets.length) return;
+    try {
+      await document.fonts?.ready;
+    } catch (e) {/* 字型未載入就用系統字體 */}
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const W = 1080,
+      PADX = 84;
+    const CW = W - PADX * 2;
+    const SANS = "'Noto Sans TC','PingFang TC','Microsoft JhengHei',sans-serif";
+    const SERIF = "'Noto Serif TC','PingFang TC',serif";
+    const wrap = (text, font, maxW) => {
+      ctx.font = font;
+      const out = [];
+      let line = "";
+      for (const ch of String(text)) {
+        if (line && ctx.measureText(line + ch).width > maxW) {
+          out.push(line);
+          line = ch;
+        } else line += ch;
+      }
+      if (line) out.push(line);
+      return out;
+    };
+    const rrect = (x, y, w, h, r) => {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    };
+    const now = new Date();
+    const weekCN = ["日", "一", "二", "三", "四", "五", "六"][now.getDay()];
+    const dateStr = `${now.getFullYear()} 年 ${now.getMonth() + 1} 月 ${now.getDate()} 日（週${weekCN}）`;
+    const ymd = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+
+    // ── 版面計算與繪製共用一段流程：draw=false 先量高度，draw=true 實際繪製 ──
+    const paint = draw => {
+      let y = 96;
+      const text = (t, font, color, size, align = "left", x = PADX) => {
+        if (draw) {
+          ctx.font = font;
+          ctx.fillStyle = color;
+          ctx.textAlign = align;
+          ctx.textBaseline = "top";
+          ctx.fillText(t, x, y);
+        }
+        y += size;
+      };
+
+      // 標題與日期
+      if (draw) {
+        ctx.font = `900 76px ${SERIF}`;
+        ctx.fillStyle = "#2B2320";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText("今日食籤", W / 2, y);
+      }
+      y += 100;
+      if (draw) {
+        ctx.font = `500 34px ${SANS}`;
+        ctx.fillStyle = "#6E5F52";
+        ctx.textAlign = "center";
+        ctx.fillText(dateStr, W / 2, y);
+      }
+      y += 62;
+
+      // 熱量／組合徽章
+      const badge = setLabel ? `${cal} 大卡 ｜ ${setLabel}` : `${cal} 大卡`;
+      ctx.font = `700 30px ${SANS}`;
+      const bw = ctx.measureText(badge).width + 72;
+      if (draw) {
+        ctx.fillStyle = "#C8402A";
+        rrect((W - bw) / 2, y, bw, 62, 31);
+        ctx.fill();
+        ctx.fillStyle = "#FFF6E9";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(badge, W / 2, y + 33);
+        ctx.textBaseline = "top";
+      }
+      y += 110;
+
+      // 各餐區塊
+      targets.forEach((m, idx) => {
+        const r = results[m];
+        // 餐別帶
+        if (draw) {
+          ctx.fillStyle = "#C8402A";
+          rrect(PADX, y, 190, 56, 12);
+          ctx.fill();
+          ctx.font = `800 30px ${SANS}`;
+          ctx.fillStyle = "#FFF6E9";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(`${MEAL_ICON[m]} ${m}`, PADX + 95, y + 30);
+          ctx.textBaseline = "top";
+        }
+        // 店家（與餐別帶同行右側）
+        if (draw) {
+          ctx.font = `900 44px ${SERIF}`;
+          ctx.fillStyle = "#2B2320";
+          ctx.textAlign = "left";
+          ctx.fillText(r.store || "點心組合", PADX + 220, y + 4);
+        }
+        y += 84;
+        // 品項
+        r.items.forEach(it => {
+          const lines = wrap("・" + it, `400 33px ${SANS}`, CW - 30);
+          lines.forEach(ln => {
+            if (draw) {
+              ctx.font = `400 33px ${SANS}`;
+              ctx.fillStyle = "#4C4238";
+              ctx.textAlign = "left";
+              ctx.fillText(ln, PADX + 16, y);
+            }
+            y += 48;
+          });
+        });
+        // 虛線分隔
+        if (idx < targets.length - 1) {
+          y += 22;
+          if (draw) {
+            ctx.strokeStyle = "#DECBA6";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([10, 10]);
+            ctx.beginPath();
+            ctx.moveTo(PADX, y);
+            ctx.lineTo(W - PADX, y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+          y += 40;
+        }
+      });
+
+      // 頁尾
+      y += 56;
+      if (draw) {
+        ctx.font = `400 24px ${SANS}`;
+        ctx.fillStyle = "#A9977C";
+        ctx.textAlign = "center";
+        ctx.fillText("菜單來源：Nuture Fit 營養專家 減脂減醣菜單", W / 2, y);
+      }
+      y += 80;
+      return y;
+    };
+    const H = paint(false);
+    canvas.width = W;
+    canvas.height = H;
+    // 背景
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#FFF9EC");
+    g.addColorStop(1, "#F6E7C9");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    // 外框
+    ctx.strokeStyle = "#2B2320";
+    ctx.lineWidth = 6;
+    rrect(24, 24, W - 48, H - 48, 28);
+    ctx.stroke();
+    paint(true);
+    const a = document.createElement("a");
+    a.href = canvas.toDataURL("image/png");
+    a.download = `今日食籤_${ymd}.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   };
   const changeCal = cNew => {
     setCal(cNew);
     setResults(null);
+    setSetLabel(null);
     if (mode !== "day" && !MEAL_ORDER[cNew].includes(mode)) setMode("day");
   };
   const changeMode = m => {
     setMode(m);
     setResults(null);
+    setSetLabel(null);
+  };
+  const changeDayStyle = st => {
+    setDayStyle(st);
+    setResults(null);
+    setSetLabel(null);
   };
   const shownMeals = results ? (activeMode === "day" ? meals : [activeMode]).filter(m => results[m]) : [];
   return /*#__PURE__*/React.createElement("div", {
@@ -617,7 +837,25 @@ function MealLottery() {
       ...S.mealBtn,
       ...(activeMode === m ? S.mealBtnActive : {})
     }
-  }, m)))), /*#__PURE__*/React.createElement("div", {
+  }, m))), activeMode === "day" && /*#__PURE__*/React.createElement("div", {
+    style: S.dayStyleRow
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => changeDayStyle("set"),
+    className: "meal-btn",
+    style: {
+      ...S.dayStyleBtn,
+      ...(dayStyle === "set" ? S.dayStyleBtnActive : {})
+    }
+  }, "照組合抽"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => changeDayStyle("mix"),
+    className: "meal-btn",
+    style: {
+      ...S.dayStyleBtn,
+      ...(dayStyle === "mix" ? S.dayStyleBtnActive : {})
+    }
+  }, "自由混搭"), /*#__PURE__*/React.createElement("span", {
+    style: S.dayStyleHint
+  }, dayStyle === "set" ? `從 ${dayCombos.length} 個營養師配好的一日組合中抽一整欄` : "各餐獨立抽，自由搭配"))), /*#__PURE__*/React.createElement("div", {
     style: S.drawWrap
   }, /*#__PURE__*/React.createElement("button", {
     onClick: doDraw,
@@ -630,7 +868,9 @@ function MealLottery() {
     }
   }, "🎋"), /*#__PURE__*/React.createElement("span", null, results ? "再抽一次" : "抽籤")), drawCount > 0 && /*#__PURE__*/React.createElement("div", {
     style: S.drawHint
-  }, "第 ", drawCount, " 抽")), shownMeals.length > 0 && /*#__PURE__*/React.createElement("section", {
+  }, "第 ", drawCount, " 抽")), shownMeals.length > 0 && setLabel && /*#__PURE__*/React.createElement("div", {
+    style: S.setBadge
+  }, "🎋 ", setLabel, "\u3000—\u3000整組照抽，可對照表格模式"), shownMeals.length > 0 && /*#__PURE__*/React.createElement("section", {
     style: S.resultGrid,
     key: drawCount
   }, shownMeals.map((m, i) => {
@@ -660,7 +900,13 @@ function MealLottery() {
       className: "redraw-btn",
       style: S.redrawBtn
     }, "重抽這一籤"));
-  })), shownMeals.length === 0 && /*#__PURE__*/React.createElement("div", {
+  })), shownMeals.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: S.exportWrap
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: exportImage,
+    className: "export-btn",
+    style: S.exportBtn
+  }, "🖼️ 輸出今日籤圖片")), shownMeals.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: S.empty
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -861,6 +1107,45 @@ const S = {
     background: INK,
     color: PAPER
   },
+  dayStyleRow: {
+    display: "flex",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 12
+  },
+  dayStyleBtn: {
+    padding: "6px 14px",
+    borderRadius: 999,
+    border: `1.5px solid #D8C49C`,
+    background: "#FFFDF6",
+    color: "#8A7860",
+    fontSize: 12.5,
+    cursor: "pointer",
+    transition: "all .18s ease",
+    letterSpacing: "0.08em"
+  },
+  dayStyleBtnActive: {
+    border: `1.5px solid ${JADE}`,
+    background: JADE,
+    color: "#FFFBF0"
+  },
+  dayStyleHint: {
+    fontSize: 12,
+    color: "#9A8468",
+    letterSpacing: "0.04em"
+  },
+  setBadge: {
+    marginBottom: 16,
+    padding: "8px 20px",
+    borderRadius: 999,
+    background: "#F3E5C8",
+    border: `1.5px dashed ${VERMILION}`,
+    color: "#8A4A2A",
+    fontSize: 13.5,
+    fontWeight: 700,
+    letterSpacing: "0.1em"
+  },
   drawWrap: {
     margin: "14px 0 30px",
     textAlign: "center"
@@ -973,6 +1258,23 @@ const S = {
     lineHeight: 1.9,
     letterSpacing: "0.08em"
   },
+  exportWrap: {
+    marginTop: 26,
+    textAlign: "center"
+  },
+  exportBtn: {
+    padding: "12px 30px",
+    borderRadius: 999,
+    border: `2px solid ${INK}`,
+    background: "#FFFDF6",
+    color: INK,
+    fontSize: 15,
+    fontWeight: 800,
+    letterSpacing: "0.12em",
+    cursor: "pointer",
+    transition: "all .18s ease",
+    boxShadow: "3px 4px 0 rgba(43,35,32,.16)"
+  },
   /* 表格模式 */
   tableWrap: {
     width: "100%",
@@ -1076,6 +1378,8 @@ const CSS = `
 .draw-btn:hover { transform: translateY(-2px); box-shadow: 0 14px 30px rgba(169,51,32,.4); }
 .draw-btn:active { transform: translateY(1px); }
 .redraw-btn:hover { background: ${JADE}; color: #FFFBF0; }
+.export-btn:hover { background: ${INK}; color: ${PAPER}; transform: translateY(-2px); }
+.export-btn:active { transform: translateY(1px); }
 button:focus-visible { outline: 3px solid ${AMBER}; outline-offset: 2px; }
 
 @keyframes shake {
