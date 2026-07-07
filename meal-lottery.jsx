@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 
 /* ==========================================================
-   菜單資料（Nuture Fit 減脂減醣菜單）
+   菜單資料（營養師規劃之減脂減醣菜單）
    結構完全依照原始海報：每個熱量 3 組菜單表，
    每組有 組合一 ~ 組合五。抽籤池由此展開，表格模式直接照原樣呈現。
    ========================================================== */
@@ -407,8 +407,39 @@ export default function MealLottery() {
   const pools = useMemo(() => buildPools(cal), [cal]);
   const dayCombos = useMemo(() => buildDayCombos(cal), [cal]);
   const meals = MEAL_ORDER[cal];
+
+  /* 商家篩選：空陣列 = 不限商家 */
+  const [pickedStores, setPickedStores] = useState([]);
+  const filterActive = pickedStores.length > 0;
+
+  const storeStats = useMemo(() => {
+    const map = new Map();
+    MEAL_ORDER[cal].forEach((m) =>
+      pools[m].forEach((cb) => { if (cb.store) map.set(cb.store, (map.get(cb.store) || 0) + 1); })
+    );
+    return [...map.entries()].sort((a, b) => b[1] - a[1]);
+  }, [cal, pools]);
+
+  const filteredPools = useMemo(() => {
+    if (!filterActive) return pools;
+    const set = new Set(pickedStores);
+    const out = {};
+    MEAL_ORDER[cal].forEach((m) => {
+      // 無店家的點心（水果、乳品等）視為隨處可得，不受篩選影響
+      out[m] = pools[m].filter((cb) => !cb.store || set.has(cb.store));
+    });
+    return out;
+  }, [pools, pickedStores, filterActive, cal]);
+
+  const toggleStore = (name) => {
+    setPickedStores((prev) => prev.includes(name) ? prev.filter((s) => s !== name) : [...prev, name]);
+    setResults(null);
+    setSetLabel(null);
+  };
+  const clearStores = () => { setPickedStores([]); setResults(null); setSetLabel(null); };
+
   const activeMode = mode === "day" || meals.includes(mode) ? mode : "day";
-  const isSetDraw = activeMode === "day" && dayStyle === "set";
+  const isSetDraw = activeMode === "day" && dayStyle === "set" && !filterActive;
 
   const doDraw = () => {
     const run = () => {
@@ -426,7 +457,7 @@ export default function MealLottery() {
         const targets = activeMode === "day" ? meals : [activeMode];
         targets.forEach((m) => {
           const prev = results && results[m] ? stamp(results[m]) : null;
-          next[m] = drawOne(pools[m], prev);
+          next[m] = drawOne(filteredPools[m], prev);
         });
         setResults(activeMode === "day" ? next : { ...(results || {}), ...next });
         setSetLabel(null);
@@ -440,7 +471,7 @@ export default function MealLottery() {
 
   const redrawMeal = (m) => {
     const prev = results && results[m] ? stamp(results[m]) : null;
-    setResults({ ...(results || {}), [m]: drawOne(pools[m], prev) });
+    setResults({ ...(results || {}), [m]: drawOne(filteredPools[m], prev) });
     setSetLabel(null); // 換掉單一餐後就不再是原本的整組
     setDrawCount((n) => n + 1);
   };
@@ -566,7 +597,7 @@ export default function MealLottery() {
       y += 56;
       if (draw) {
         ctx.font = `400 24px ${SANS}`; ctx.fillStyle = "#A9977C"; ctx.textAlign = "center";
-        ctx.fillText("菜單來源：Nuture Fit 營養專家 減脂減醣菜單", W / 2, y);
+        ctx.fillText("菜單由營養師規劃・減脂減醣", W / 2, y);
       }
       y += 80;
       return y;
@@ -619,13 +650,14 @@ export default function MealLottery() {
     setCal(cNew);
     setResults(null);
     setSetLabel(null);
+    setPickedStores([]); // 各熱量的商家清單不同，切換時重置
     if (mode !== "day" && !MEAL_ORDER[cNew].includes(mode)) setMode("day");
   };
   const changeMode = (m) => { setMode(m); setResults(null); setSetLabel(null); };
   const changeDayStyle = (st) => { setDayStyle(st); setResults(null); setSetLabel(null); };
 
   const shownMeals = results
-    ? (activeMode === "day" ? meals : [activeMode]).filter((m) => results[m])
+    ? (activeMode === "day" ? meals : [activeMode]).filter((m) => m in results)
     : [];
 
   return (
@@ -704,7 +736,7 @@ export default function MealLottery() {
                 <button
                   onClick={() => changeDayStyle("set")}
                   className="meal-btn"
-                  style={{ ...S.dayStyleBtn, ...(dayStyle === "set" ? S.dayStyleBtnActive : {}) }}
+                  style={{ ...S.dayStyleBtn, ...(dayStyle === "set" ? S.dayStyleBtnActive : {}), ...(filterActive ? { opacity: 0.45 } : {}) }}
                 >照組合抽</button>
                 <button
                   onClick={() => changeDayStyle("mix")}
@@ -712,10 +744,44 @@ export default function MealLottery() {
                   style={{ ...S.dayStyleBtn, ...(dayStyle === "mix" ? S.dayStyleBtnActive : {}) }}
                 >自由混搭</button>
                 <span style={S.dayStyleHint}>
-                  {dayStyle === "set"
+                  {filterActive
+                    ? "已指定商家，一整天將以自由混搭抽出"
+                    : dayStyle === "set"
                     ? `從 ${dayCombos.length} 個營養師配好的一日組合中抽一整欄`
                     : "各餐獨立抽，自由搭配"}
                 </span>
+              </div>
+            )}
+          </section>
+
+          {/* 商家篩選 */}
+          <section style={S.section}>
+            <div style={S.sectionLabel}>
+              指定商家
+              <span style={S.sectionLabelNote}>（今天附近有什麼就點什麼，不點 = 不限）</span>
+            </div>
+            <div style={S.storeRow}>
+              {storeStats.map(([name, count]) => {
+                const on = pickedStores.includes(name);
+                return (
+                  <button
+                    key={name}
+                    onClick={() => toggleStore(name)}
+                    className="meal-btn"
+                    style={{ ...S.storeChip, ...(on ? S.storeChipActive : {}) }}
+                  >
+                    {name} <span style={{ opacity: 0.65, fontSize: 11 }}>{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {filterActive && (
+              <div style={S.storeSummary}>
+                <span>
+                  可抽選項：{meals.map((m) => `${m} ${filteredPools[m].length}`).join("・")}
+                  {meals.some((m) => filteredPools[m].length === 0) && "（0 的餐別抽不出來，建議多勾幾家）"}
+                </span>
+                <button onClick={clearStores} className="meal-btn" style={S.clearBtn}>清除</button>
               </div>
             )}
           </section>
@@ -735,6 +801,24 @@ export default function MealLottery() {
             <section style={S.resultGrid} key={drawCount}>
               {shownMeals.map((m, i) => {
                 const r = results[m];
+                if (!r) {
+                  return (
+                    <article
+                      key={m}
+                      className={reduceMotion ? "" : "stick-in"}
+                      style={{ ...S.stick, animationDelay: `${i * 90}ms`, opacity: 0.75 }}
+                    >
+                      <div style={{ ...S.stickTop, background: "#9A8468" }}>
+                        <span style={S.stickIcon}>{MEAL_ICON[m]}</span>
+                        <span style={S.stickMeal}>{m}籤</span>
+                      </div>
+                      <div style={{ ...S.stickStore, fontSize: 18, color: "#9A8468" }}>抽不出來</div>
+                      <div style={{ fontSize: 13, color: "#8A7860", lineHeight: 1.7, flex: 1, paddingTop: 8 }}>
+                        所選商家沒有{m}的選項，多勾幾家商家或清除篩選再抽
+                      </div>
+                    </article>
+                  );
+                }
                 return (
                   <article
                     key={m}
@@ -842,7 +926,7 @@ export default function MealLottery() {
       )}
 
       <footer style={S.footer}>
-        菜單來源：Nuture Fit 營養專家 減脂減醣菜單（1600／1800／2000 大卡）
+        菜單由營養師規劃（1600／1800／2000 大卡減脂減醣配置）
       </footer>
     </div>
   );
@@ -944,6 +1028,28 @@ const S = {
   },
   dayStyleBtnActive: { border: `1.5px solid ${JADE}`, background: JADE, color: "#FFFBF0" },
   dayStyleHint: { fontSize: 12, color: "#9A8468", letterSpacing: "0.04em" },
+  sectionLabelNote: { fontWeight: 400, letterSpacing: "0.05em", marginLeft: 6, textTransform: "none" },
+  storeRow: { display: "flex", flexWrap: "wrap", gap: 6 },
+  storeChip: {
+    padding: "7px 13px", borderRadius: 999,
+    border: `1.5px solid #E4D3B4`, background: "#FFFDF6", color: "#8A7860",
+    fontSize: 13, cursor: "pointer", transition: "all .18s ease",
+  },
+  storeChipActive: {
+    border: `1.5px solid ${VERMILION}`, background: VERMILION, color: "#FFF6E9",
+  },
+  storeSummary: {
+    marginTop: 10, display: "flex", alignItems: "center", justifyContent: "space-between",
+    gap: 10, flexWrap: "wrap",
+    fontSize: 12, color: "#7A6547", background: "#F3E5C8",
+    borderRadius: 10, padding: "8px 12px", lineHeight: 1.6,
+  },
+  clearBtn: {
+    padding: "4px 14px", borderRadius: 999,
+    border: `1.5px solid ${INK}`, background: "transparent", color: INK,
+    fontSize: 12, fontWeight: 700, cursor: "pointer", transition: "all .18s ease",
+    flexShrink: 0,
+  },
 
   setBadge: {
     marginBottom: 16,
